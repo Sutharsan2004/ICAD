@@ -408,9 +408,8 @@ from shapely.geometry import Point, LineString, Polygon, MultiPoint, MultiLineSt
 from shapely.ops import polygonize, unary_union
 from shapely.strtree import STRtree
 
-# ==========================================
 # 0. LAYER FILTERING
-# ==========================================
+
 
 def filter_dxf_layers(input_filepath, output_filepath, include_layers):
     print(f"\n[+] Filtering layers in {os.path.basename(input_filepath)}...")
@@ -429,9 +428,7 @@ def filter_dxf_layers(input_filepath, output_filepath, include_layers):
         print(f"Error filtering layers: {e}")
         return False
 
-# ==========================================
 # 1. DYNAMIC SCALE DETECTOR
-# ==========================================
 
 def get_dxf_scale_to_mm(filepath):
     try:
@@ -446,41 +443,34 @@ def get_dxf_scale_to_mm(filepath):
     except Exception:
         return 1.0
 
-# ==========================================
 # 2. VISUALIZATION ENGINE
-# ==========================================
 
 def visualize_results(wall_lines, wall_cavities, rooms, objects_data):
     """Plots Rooms (Blue), Walls (Black), and Objects (Red) with precise labeling."""
     plt.figure(figsize=(16, 10))
     
-    # LAYER 1: Rooms (Light Blue Fill)
     for room in rooms:
         poly = room.get('polygon')
         if poly and poly.geom_type == 'Polygon':
             x, y = poly.exterior.xy
             plt.fill(x, y, alpha=0.35, color='dodgerblue', edgecolor='blue', linewidth=1, zorder=1)
             
-            # Room Label
             centroid = poly.centroid
             plt.text(centroid.x, centroid.y, room['name'], 
                      fontsize=9, ha='center', va='center', weight='bold',
                      bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=2), zorder=5)
             
-    # LAYER 2: Solid Wall Cavities
     for cav in wall_cavities:
         if cav.geom_type == 'Polygon':
             x, y = cav.exterior.xy
             plt.fill(x, y, alpha=1.0, color='dimgray', zorder=2)
 
-    # LAYER 3: Clean Structural Wall Outlines
     for i, line in enumerate(wall_lines):
         x_coords = [line[0][0], line[1][0]]
         y_coords = [line[0][1], line[1][1]]
         label = 'Structural Walls' if i == 0 else ""
         plt.plot(x_coords, y_coords, color='black', linewidth=2.0, zorder=3, label=label)
         
-    # LAYER 4: Objects / Doors (Red Dots + Labels)
     if objects_data:
         obj_x = [obj['center_x'] for obj in objects_data]
         obj_y = [obj['center_y'] for obj in objects_data]
@@ -498,9 +488,8 @@ def visualize_results(wall_lines, wall_cavities, rooms, objects_data):
     plt.grid(True, linestyle='--', alpha=0.3)
     plt.show()
 
-# ==========================================
 # 3. GEOMETRY EXTRACTION
-# ==========================================
+
 
 def process_cad_entity(entity, raw_lines, scale=1.0):
     if entity.dxftype() == 'INSERT':
@@ -529,9 +518,9 @@ def extract_dxf_geometry_by_layer(filepath, target_layers, scale=1.0):
             process_cad_entity(entity, raw_lines, scale)
     return raw_lines
 
-# ==========================================
+
 # 4. FILTERING & MEASUREMENT ENGINE
-# ==========================================
+
 
 def extract_objects_and_walls(raw_lines, gap_tolerance=15):
     """Processes structural lines into clean, continuous wall segments."""
@@ -599,13 +588,11 @@ def extract_measurements(wall_lines, objects_data, max_door_width=4000, min_room
         
     invisible_doors = []
     
-    # 1. Cap Double-Line Wall Ends (<= 400mm)
     for i, ep1 in enumerate(valid_endpoints):
         for j, ep2 in enumerate(valid_endpoints):
             if i < j and ep1.distance(ep2) <= 400:
                 invisible_doors.append(LineString([ep1, ep2]))
 
-    # 2. STRICT Orthogonal Ray-Casting (Seals massive 120+ sqm archways safely)
     for i, ep1 in enumerate(valid_endpoints):
         for j, ep2 in enumerate(valid_endpoints):
             if i < j:
@@ -613,13 +600,11 @@ def extract_measurements(wall_lines, objects_data, max_door_width=4000, min_room
                 if 400 < dist <= max_door_width:
                     dx = abs(ep1.x - ep2.x)
                     dy = abs(ep1.y - ep2.y)
-                    # Line must be nearly perfectly horizontal or vertical (150mm CAD tolerance)
                     if dx < 150 or dy < 150: 
                         bridge = LineString([ep1, ep2])
                         if not bridge.crosses(merged_walls):
                             invisible_doors.append(bridge)
                             
-    # 3. Polygonize
     all_geometry = lines_list + invisible_doors
     noded_geometry = unary_union(all_geometry)
     raw_polygons = list(polygonize(noded_geometry))
@@ -638,12 +623,11 @@ def extract_measurements(wall_lines, objects_data, max_door_width=4000, min_room
         
         is_valid_room = False
         
-        # Rule 1: Large enough to be a room
         if area >= min_room_area:
             is_valid_room = True
-        # Rule 2: Too small to be a room, BUT contains a door/object (Utility closet/Toilet)
+        
         elif min_closet_area <= area < min_room_area:
-            buffered_poly = poly.buffer(50) # Buffer slightly to catch objects touching the walls
+            buffered_poly = poly.buffer(50) 
             for obj in objects_data:
                 if buffered_poly.covers(obj['point']):
                     is_valid_room = True
@@ -660,11 +644,10 @@ def extract_measurements(wall_lines, objects_data, max_door_width=4000, min_room
         elif 10000 < area < min_closet_area: 
             wall_cavities.append(poly)
 
-    # Filter nested duplicate polygons
     clean_rooms = []
     for i, room in enumerate(rooms_data):
         is_invalid = False
-        if room['area'] > (total_bbox_area * 0.4): continue # Skip outer building shell
+        if room['area'] > (total_bbox_area * 0.4): continue 
             
         for j, other_room in enumerate(rooms_data):
             if i != j:
@@ -679,7 +662,6 @@ def extract_measurements(wall_lines, objects_data, max_door_width=4000, min_room
         if not is_invalid:
             clean_rooms.append(room)
             
-    # Sort by size and assign sequential simple names
     clean_rooms = sorted(clean_rooms, key=lambda x: x['area'], reverse=True)
     for idx, room in enumerate(clean_rooms):
         room['name'] = f"Room {idx+1}"
@@ -688,14 +670,12 @@ def extract_measurements(wall_lines, objects_data, max_door_width=4000, min_room
     return clean_rooms, wall_cavities
 
 
-# ==========================================
 # 5. MAIN EXECUTION WORKFLOW
-# ==========================================
+
 if __name__ == "__main__":
-    RAW_DXF_FILE = r"C:\Users\abine\OneDrive\Documents\Icebergs_sudharsan\CAD_R&D\Graph Based CAD\DXF_FIles\House Floor Plan Sample.dxf" 
-    CLEAN_DXF_FILE = r"C:\Users\abine\OneDrive\Documents\Icebergs_sudharsan\CAD_R&D\Graph Based CAD\DXF_FIles\Cleaned_sample.dxf"
+    RAW_DXF_FILE = r"DXF_FILE_Path" 
+    CLEAN_DXF_FILE = r"Cleaned_file_path"
     
-    # LAYER SEPARATION
     STRUCTURAL_LAYERS = ["Wall", "Walls", "Structural", "0", "Windows", "Base"] 
     FURNITURE_LAYERS = ["Furniture", "Doors"] 
     
